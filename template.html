@@ -1,0 +1,143 @@
+"""Generate predictions.json: everything the website needs.
+
+Replays all history through the tuned Elo model, then predicts every
+not-yet-played game on the current season's schedule. Also emits current
+power ratings, season records, per-team Elo trajectories, recent results
+with the model's pregame view, and honest backtest metrics.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+
+from backtest import EVAL_FROM, evaluate
+from model import EloModel, load_games, run_history
+
+OUT = Path(__file__).resolve().parent.parent / "data" / "predictions.json"
+
+
+def build(games: pd.DataFrame | None = None) -> dict:
+    games = games if games is not None else load_games()
+    current_season = int(games["season"].max())
+
+    model = EloModel()
+    # Track Elo trajectory through the current season for the chart, and the
+    # model's pregame view of each current-season game for the results feed.
+    trajectory: dict[str, list] = {}
+    rows = []
+    recent = []
+    for g in games[games["completed"]].itertuples():
+        pre = model.update(
+            g.home_id, g.away_id, g.date, int(g.season),
+            g.home_score, g.away_score, bool(g.neutral_site),
+        )
+        if int(g.season) >= EVAL_FROM:
+            rows.append(dict(
+                season=int(g.season), win_prob_home=pre["win_prob_home"],
+                spread_home=pre["spread_home"], total=pre["total"],
+                margin=g.home_score - g.away_score,
+                actual_total=g.home_score + g.away_score,
+            ))
+        if int(g.season) == current_season:
+            for tid in (g.home_id, g.away_id):
+                trajectory.setdefault(tid, []).append(
+                    [g.date.strftime("%Y-%m-%d"), round(model.teams[tid].rating, 1)]
+                )
+            recent.append(dict(
+                game_id=g.game_id, date=g.date.isoformat(),
+                home=g.home_id, away=g.away_id,
+                home_score=int(g.home_score), away_score=int(g.away_score),
+                win_prob_home=round(pre["win_prob_home"], 4),
+                spread_home=round(pre["spread_home"], 1),
+            ))
+    recent = recent[::-1][:40]
+    preds_hist = pd.DataFrame(rows)
+    metrics_all = evaluate(preds_hist)
+    metrics_season = evaluate(preds_hist[preds_hist["season"] == current_season])
+
+    season_games = games[games["season"] == current_season]
+
+    # Team directory with records, built from the current season.
+    teams: dict[str, dict] = {}
+    for g in season_games.itertuples():
+        for side in ("home", "away"):
+            tid = getattr(g, f"{side}_id")
+            if tid not in teams:
+                teams[tid] = dict(
+                    id=tid,
+                    name=getattr(g, f"{side}_display_name"),
+                    abbr=getattr(g, f"{side}_abbreviation"),
+                    logo=getattr(g, f"{side}_logo"),
+                    color=(getattr(g, f"{side}_color") or "888888"),
+                    alt_color=(getattr(g, f"{side}_alternate_color") or "444444"),
+                    wins=0, losses=0,
+                )
+    for g in season_games[season_games["completed"]].itertuples():
+        home_won = g.home_score > g.away_score
+        teams[g.home_id]["wins" if home_won else "losses"] += 1
+        teams[g.away_id]["losses" if home_won else "wins"] += 1
+
+    for tid, t in teams.items():
+        state = model.teams.get(tid)
+        t["rating"] = round(state.rating, 1) if state else 1500.0
+        t["off"] = round(state.pts_for, 1) if state else None
+        t["deff"] = round(state.pts_against, 1) if state else None
+        t["trajectory"] = trajectory.get(tid, [])
+
+    rankings = sorted(teams.values(), key=lambda t: -t["rating"])
+    for i, t in enumerate(rankings, 1):
+        t["rank"] = i
+
+    # Predictions for every remaining game this season.
+    upcoming = []
+    for g in season_games[~season_games["completed"]].itertuples():
+        if g.home_id not in teams or g.away_id not in teams:
+            continue
+        pre = model.pregame(
+            g.home_id, g.away_id, g.date, current_season, bool(g.neutral_site)
+        )
+        upcoming.append(dict(
+            game_id=g.game_id,
+            date=g.date.isoformat(),
+            home=g.home_id, away=g.away_id,
+            venue=(g.venue_full_name or ""),
+            city=(g.venue_address_city or ""),
+            neutral=bool(g.neutral_site),
+            win_prob_home=round(pre["win_prob_home"], 4),
+            spread_home=round(pre["spread_home"], 1),
+            total=round(pre["total"], 1),
+            home_pts=round(pre["home_pts"], 1),
+            away_pts=round(pre["away_pts"], 1),
+        ))
+    upcoming.sort(key=lambda g: g["date"])
+
+    return dict(
+        generated=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        season=current_season,
+        params=dict(
+            {k: getattr(model, k) for k in
+             ("k", "home_adv", "carryover", "elo_per_point", "rest_bonus")},
+            total_adjust=round(model.total_resid, 2),
+        ),
+        metrics=dict(
+            all={k: round(float(v), 4) for k, v in metrics_all.items()},
+            season={k: round(float(v), 4) for k, v in metrics_season.items()},
+            eval_from=EVAL_FROM,
+        ),
+        teams=teams,
+        rankings=[t["id"] for t in rankings],
+        upcoming=upcoming,
+        recent=recent,
+    )
+
+
+if __name__ == "__main__":
+    payload = build()
+    OUT.write_text(json.dumps(payload))
+    print(f"wrote {OUT} ({OUT.stat().st_size/1024:.0f} KiB): "
+          f"{len(payload['upcoming'])} upcoming games, "
+          f"{len(payload['teams'])} teams")
