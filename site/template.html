@@ -433,7 +433,13 @@ function viewPlayer(id){
 }
 function initials(n){ return n.split(" ").map(w=>w[0]).slice(0,2).join(""); }
 function defaultLine(mean, games, m){
-  const base = mean ?? (games.length ? games.slice(-10).reduce((s,g)=>s+logVal(g,m),0)/Math.min(10,games.length) : 10);
+  // proxy for the number a book would post: recent form (L10 average),
+  // falling back to the model mean for thin histories — matches the
+  // synthetic line the backtest was validated against
+  const l10 = games.length >= 3
+    ? games.slice(-10).reduce((s,g)=>s+logVal(g,m),0)/Math.min(10,games.length)
+    : null;
+  const base = l10 ?? mean ?? 10;
   return Math.max(Math.floor(base)+0.5, 0.5);
 }
 function verdictHtml(mean, pOver, line){
@@ -468,12 +474,15 @@ function logTable(games, m){
 }
 
 // --- screener ---
-let SC = {market:"pts", sort:"conf", dir:-1, minMin:15};
+let SC = {market:"pts", sort:"conf", dir:-1, minMin:15, all:false};
 function viewScreener(){
   const m = SC.market;
   const rows = [];
+  const seen = new Set();
   for(const g of P.slate){
     for(const pl of g.players){
+      if(!SC.all && seen.has(pl.id)) continue;
+      seen.add(pl.id);
       if(pl.minutes < SC.minMin) continue;
       const games = logsOf(pl.id);
       if(games.length<5) continue;
@@ -491,9 +500,10 @@ function viewScreener(){
   rows.sort((a,b)=> (a[key]>b[key]?1:a[key]<b[key]?-1:0) * SC.dir);
   const th = (k, lbl, left) => `<th class="${left?"l ":""}${SC.sort===k?"sorted":""}" data-k="${k}">${lbl}${SC.sort===k?(SC.dir<0?" ↓":" ↑"):""}</th>`;
   let h = `<div class="card">
-    <h2>Prop screener <span class="sub">— every projected player on the ${10}-day slate; line = model-median x.5</span></h2>
+    <h2>Prop screener <span class="sub">— projected players on the ${10}-day slate; line = L10-average proxy (stand-in for the book's number)</span></h2>
     <div class="pill-row">${MK.map(k=>`<span class="pill${k===m?" on":""}" data-m="${k}">${esc(LB[k])}</span>`).join("")}
-      <span style="margin-left:auto" class="muted">min minutes
+      <span class="pill${SC.all?" on":""}" id="allTgl" style="margin-left:auto">${SC.all?"all slate games":"next game each"}</span>
+      <span class="muted">min minutes
         <input id="minMin" type="number" value="${SC.minMin}" style="width:56px;background:var(--card);
         border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:3px 6px"></span></div>
     <div class="scroll"><table id="scT">
@@ -516,7 +526,8 @@ function viewScreener(){
       at the shown synthetic line. Enter the sportsbook's real line and odds on the player page before betting.</div>
   </div>`;
   main.innerHTML = h;
-  document.querySelectorAll(".pill").forEach(el=>el.onclick=()=>{SC.market=el.dataset.m; viewScreener();});
+  document.querySelectorAll(".pill[data-m]").forEach(el=>el.onclick=()=>{SC.market=el.dataset.m; viewScreener();});
+  $("#allTgl").onclick = () => { SC.all=!SC.all; viewScreener(); };
   $("#minMin").onchange = e => { SC.minMin=+e.target.value; viewScreener(); };
   document.querySelectorAll("#scT th[data-k]").forEach(el=>el.onclick=()=>{
     const k = el.dataset.k;

@@ -201,7 +201,9 @@ def build_props(games: pd.DataFrame, elo: dict) -> dict:
 
 
 def inject(payload: dict) -> None:
-    data_js = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    # allow_nan=False: a NaN would silently break JSON.parse in the browser
+    data_js = json.dumps(payload, separators=(",", ":"),
+                         allow_nan=False).replace("</", "<\\/")
     html = TEMPLATE.read_text().replace("__DATA_JSON__", data_js)
     DOCS.mkdir(exist_ok=True)
     (DOCS / "index.html").write_text(html)

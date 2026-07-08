@@ -369,7 +369,8 @@ class PropEngine:
             p.name = r.athlete_display_name
             p.pos = r.pos
             p.team_id = r.team_id
-            p.headshot = getattr(r, "athlete_headshot_href", "") or ""
+            hs = getattr(r, "athlete_headshot_href", "")
+            p.headshot = hs if isinstance(hs, str) else ""
             if not r.played:
                 continue
             self._season_rollover(p, season)
