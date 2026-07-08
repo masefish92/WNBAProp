@@ -5,14 +5,22 @@ over/under probabilities, hit rates, matchup context, and honest
 walk-forward backtests. Rebuilt automatically from
 [wehoop](https://github.com/sportsdataverse/wehoop-wnba-data) (ESPN) data.
 
-**The site is one static file: [`docs/index.html`](docs/index.html).**
+## Quick start (local)
 
-Deploying on [Vercel](https://vercel.com): import this repo (Add New →
-Project), leave the framework as **Other** — `vercel.json` already points
-the output at `docs/`, no build step needed. Every push (including the
-automated data refreshes) redeploys the site. GitHub Pages
-(Settings → Pages → deploy from branch → `/docs`) works too, and the file
-also just opens locally in a browser.
+```bash
+pip install -r requirements.txt
+python run_local.py
+```
+
+That downloads the latest box scores, rebuilds the site, and opens it at
+http://localhost:8000. Run it again any time you want fresh numbers
+(mornings and after games). `--no-fetch` rebuilds without downloading;
+`--backtest` also re-runs the full 5-season backtest (~2 min).
+
+The site itself is one static file — `docs/index.html` — so it also works
+opened directly in a browser, deployed on Vercel (a `vercel.json` is
+included; import the repo, framework "Other", zero config), or via GitHub
+Pages (Settings → Pages → `/docs`).
 
 ## What's inside
 
