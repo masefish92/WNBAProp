@@ -6,8 +6,13 @@ walk-forward backtests. Rebuilt automatically from
 [wehoop](https://github.com/sportsdataverse/wehoop-wnba-data) (ESPN) data.
 
 **The site is one static file: [`docs/index.html`](docs/index.html).**
-Open it locally or serve it with GitHub Pages
-(Settings → Pages → deploy from branch → `/docs`).
+
+Deploying on [Vercel](https://vercel.com): import this repo (Add New →
+Project), leave the framework as **Other** — `vercel.json` already points
+the output at `docs/`, no build step needed. Every push (including the
+automated data refreshes) redeploys the site. GitHub Pages
+(Settings → Pages → deploy from branch → `/docs`) works too, and the file
+also just opens locally in a browser.
 
 ## What's inside
 
